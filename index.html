@@ -1,0 +1,2527 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#F6F1FF" />
+<title>스타필드 미션 · 한수중 1학년</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Gothic+A1:wght@400;700;900&family=Jua&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin:0; padding:0; background:#F6F1FF; }
+  #boot { font-family:'Gothic A1', sans-serif; font-weight:700; color:#6E6A85;
+          text-align:center; padding:70px 24px; font-size:14.5px; line-height:1.85; }
+  #boot b { display:block; font-family:'Jua', sans-serif; font-weight:400;
+            font-size:25px; color:#14121F; margin-bottom:12px; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script>window.React||document.write('<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"><\/script>')</script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script>window.ReactDOM||document.write('<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"><\/script>')</script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.24.7/babel.min.js"></script>
+<script>window.Babel||document.write('<script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"><\/script>')</script>
+</head>
+<body>
+<div id="root"><div id="boot"><b>스타필드 미션</b>화면을 준비하고 있어요</div></div>
+<script>
+setTimeout(function () {
+  var b = document.getElementById("boot");
+  if (!b) return;
+  var why = !window.React || !window.ReactDOM || !window.Babel
+    ? "인터넷에서 필요한 파일을 받지 못했습니다."
+    : "화면을 그리는 중 문제가 생겼습니다.";
+  b.innerHTML = '<b>앱이 안 열려요</b>' + why +
+    '<br>와이파이가 연결돼 있는지 확인하고, 이 페이지를 새로고침(F5) 해보세요.' +
+    '<br>학교 와이파이라면 차단 때문일 수 있으니 휴대폰 데이터나 다른 인터넷으로 열어 보세요.';
+}, 12000);
+</script>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useCallback } = React;
+
+/* ─────────────────────────────────────────────
+   한수중학교 1학년 현장체험학습 · 고양 스타필드
+   미션1 간판 글자 모으기 / 미션2 장소 찾기 / 먹은 것 게시판
+   ───────────────────────────────────────────── */
+
+const CLASSES = {
+  "1": {
+    label: "1학년 1반",
+    teacher: "hye jeong",
+    teacherName: "혜정쌤",
+    teacherCode: "1101",
+    color: "#6B4EFF",
+    codes: ["137", "254", "381", "426", "593"],
+  },
+  "3": {
+    label: "1학년 3반",
+    teacher: "Margaret",
+    teacherName: "찌니쌤",
+    teacherCode: "3303",
+    color: "#17B8B8",
+    codes: ["612", "748", "865", "921", "173", "305", "480"],
+  },
+  "7": {
+    label: "1학년 7반",
+    teacher: "Kayoon",
+    teacherName: "가윤쌤",
+    teacherCode: "7707",
+    color: "#FF7A5A",
+    codes: ["519", "637", "742", "856", "964", "218"],
+  },
+};
+
+const APP_VERSION = "16";
+
+const TEACHER_CODES = {};
+Object.keys(CLASSES).forEach((cls) => {
+  TEACHER_CODES[CLASSES[cls].teacherCode] = cls;
+});
+
+const CODE_MAP = {};
+Object.keys(CLASSES).forEach((cls) => {
+  CLASSES[cls].codes.forEach((code, i) => {
+    CODE_MAP[code] = { cls, group: i + 1 };
+  });
+});
+
+const M2_SLOTS = 5;
+
+/* ── 저장 설정 (Firebase Firestore) ──────────────────
+   두 가지 방법 중 하나만 하면 됩니다.
+   (1) 앱을 열어 로그인 화면 아래 '앱 설정'에서 붙여넣기
+   (2) 아래 두 줄을 직접 채우기
+   ───────────────────────────────────────────────── */
+const FB_PROJECT = ""; // 예) starfield-a1b2c
+const FB_KEY = ""; // 웹 API 키 (AIza... 로 시작)
+
+const encodeCfg = (c) => btoa(JSON.stringify(c));
+const decodeCfg = (s) => JSON.parse(atob(s));
+
+function readConfig() {
+  if (FB_PROJECT && FB_KEY) return { project: FB_PROJECT, key: FB_KEY };
+  try {
+    const q = new URLSearchParams(
+      (window.location.search || "").slice(1) || (window.location.hash || "").slice(1)
+    );
+    const raw = q.get("db");
+    if (raw) {
+      const d = decodeCfg(raw);
+      if (d && d.project && d.key) {
+        try {
+          localStorage.setItem("sf:cfg", JSON.stringify(d));
+        } catch (e) {}
+        return d;
+      }
+    }
+  } catch (e) {}
+  try {
+    const s = localStorage.getItem("sf:cfg");
+    if (s) {
+      const d = JSON.parse(s);
+      if (d && d.project && d.key) return d;
+    }
+  } catch (e) {}
+  return null;
+}
+
+let CFG = readConfig();
+let useCloud = !!CFG;
+const artifactStore = typeof window !== "undefined" && window.storage;
+let LAST_ERROR = "";
+
+function saveConfig(project, key) {
+  CFG = { project: project.trim(), key: key.trim() };
+  useCloud = true;
+  try {
+    localStorage.setItem("sf:cfg", JSON.stringify(CFG));
+  } catch (e) {}
+  return CFG;
+}
+
+function shareLink() {
+  if (!CFG) return "";
+  return window.location.origin + window.location.pathname + "?db=" + encodeCfg(CFG);
+}
+
+/* 이 기기에만 남는 값 */
+const local = {
+  get(k) {
+    try {
+      const v = localStorage.getItem("sf:" + k);
+      return v ? JSON.parse(v) : null;
+    } catch (e) {
+      return null;
+    }
+  },
+  set(k, v) {
+    try {
+      localStorage.setItem("sf:" + k, JSON.stringify(v));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  },
+  del(k) {
+    try {
+      localStorage.removeItem("sf:" + k);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  },
+  list(prefix) {
+    const out = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("sf:" + prefix)) out.push(k.slice(3));
+      }
+    } catch (e) {}
+    return out;
+  },
+};
+
+const personal = {
+  async get(k) {
+    if (artifactStore && !useCloud) {
+      try {
+        const r = await window.storage.get(k, false);
+        return r && r.value ? JSON.parse(r.value) : null;
+      } catch (e) {
+        return null;
+      }
+    }
+    return local.get(k);
+  },
+  async set(k, v) {
+    if (artifactStore && !useCloud) {
+      try {
+        await window.storage.set(k, JSON.stringify(v), false);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    }
+    return local.set(k, v);
+  },
+};
+
+/* 저장 상태 알림 */
+const SyncBus = {
+  state: "idle",
+  at: 0,
+  subs: new Set(),
+  emit(state) {
+    SyncBus.state = state;
+    if (state === "ok") SyncBus.at = Date.now();
+    SyncBus.subs.forEach((f) => f());
+  },
+};
+
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/* ── Firestore 주소 만들기 ──
+   키 "m1:137:4" → groups/137/m1/4 처럼 모둠별 칸으로 나눠 담는다.
+   그래야 학생 한 명이 자기 모둠 것만 가볍게 불러올 수 있다. */
+const fbBase = () =>
+  `https://firestore.googleapis.com/v1/projects/${CFG.project}/databases/(default)/documents`;
+
+function docPath(key) {
+  const p = key.split(":");
+  const head = p[0];
+  const rest = p.slice(2).join("_") || "x";
+  if (head === "m1" || head === "m2" || head === "mem") return `groups/${p[1]}/${head}/${rest}`;
+  if (head === "post") return `posts/${p.slice(1).join("_")}`;
+  if (head === "re") return `replies/${p.slice(1).join("_")}`;
+  if (head === "m2photo") return `m2photo/${p.slice(1).join("_")}`;
+  return `misc/${key.replace(/[:/]/g, "_")}`;
+}
+
+/* 접두어로 읽을 때 뒤져야 할 칸들 */
+function collectionsFor(prefix) {
+  const p = prefix.split(":");
+  const head = p[0];
+  if (head === "m1" || head === "m2" || head === "mem") {
+    if (p[1]) return [`groups/${p[1]}/${head}`];
+    return Object.keys(CODE_MAP).map((code) => `groups/${code}/${head}`);
+  }
+  if (head === "post") return ["posts"];
+  if (head === "re") return ["replies"];
+  if (head === "m2photo") return ["m2photo"];
+  return ["misc"];
+}
+
+async function fbRequest(url, options) {
+  const sep = url.indexOf("?") >= 0 ? "&" : "?";
+  const full = `${url}${sep}key=${encodeURIComponent(CFG.key)}`;
+  let r;
+  try {
+    r = await fetch(full, options);
+  } catch (e) {
+    LAST_ERROR = "연결끊김(" + ((e && e.name) || "오류") + ")";
+    throw e;
+  }
+  if (!r.ok) {
+    let t = "";
+    try {
+      t = (await r.text()).slice(0, 90);
+    } catch (e) {}
+    LAST_ERROR = r.status + " " + t;
+    const err = new Error("http");
+    err.status = r.status;
+    throw err;
+  }
+  LAST_ERROR = "";
+  return r;
+}
+
+const cloud = {
+  async get(k) {
+    try {
+      const r = await fbRequest(`${fbBase()}/${docPath(k)}`, {});
+      const j = await r.json();
+      const raw = j && j.fields && j.fields.v && j.fields.v.stringValue;
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      if (e && e.status === 404) return null; // 아직 없는 값
+      throw e;
+    }
+  },
+
+  async set(k, v) {
+    try {
+      await fbRequest(`${fbBase()}/${docPath(k)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fields: {
+            k: { stringValue: k },
+            v: { stringValue: JSON.stringify(v) },
+            at: { stringValue: new Date().toISOString() },
+          },
+        }),
+      });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  },
+
+  async del(k) {
+    try {
+      await fbRequest(`${fbBase()}/${docPath(k)}`, { method: "DELETE" });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  },
+
+  async listDocs(col) {
+    const out = [];
+    let token = "";
+    for (let page = 0; page < 8; page++) {
+      let r;
+      try {
+        r = await fbRequest(
+          `${fbBase()}/${col}?pageSize=300${token ? "&pageToken=" + encodeURIComponent(token) : ""}`,
+          {}
+        );
+      } catch (e) {
+        break; // 아직 아무것도 없는 칸이면 여기로 온다
+      }
+      const j = await r.json();
+      (j.documents || []).forEach((d) => {
+        const f = d.fields || {};
+        const key = f.k && f.k.stringValue;
+        const raw = f.v && f.v.stringValue;
+        if (key && raw) {
+          try {
+            out.push([key, JSON.parse(raw)]);
+          } catch (e) {}
+        }
+      });
+      if (!j.nextPageToken) break;
+      token = j.nextPageToken;
+    }
+    return out;
+  },
+
+  async getAll(prefix) {
+    const cols = collectionsFor(prefix);
+    const chunks = await Promise.all(cols.map((c) => cloud.listDocs(c)));
+    const out = {};
+    chunks.forEach((rows) =>
+      rows.forEach(([k, v]) => {
+        if (k.startsWith(prefix)) out[k] = v;
+      })
+    );
+    return out;
+  },
+};
+
+const S = {
+  async get(key, shared = true) {
+    if (!shared) return personal.get(key);
+    try {
+      if (useCloud) return await cloud.get(key);
+      if (artifactStore) {
+        const r = await window.storage.get(key, true);
+        return r && r.value ? JSON.parse(r.value) : null;
+      }
+      return local.get(key);
+    } catch (e) {
+      return null;
+    }
+  },
+
+  async set(key, value, shared = true) {
+    if (!shared) return personal.set(key, value);
+    SyncBus.emit("saving");
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        let ok;
+        if (useCloud) ok = await cloud.set(key, value);
+        else if (artifactStore) ok = !!(await window.storage.set(key, JSON.stringify(value), true));
+        else ok = local.set(key, value);
+        if (ok) {
+          SyncBus.emit("ok");
+          return true;
+        }
+      } catch (e) {}
+      if (attempt < 2) await wait(700 * (attempt + 1));
+    }
+    SyncBus.emit("fail");
+    return false;
+  },
+
+  async del(key, shared = true) {
+    if (!shared) return local.del(key);
+    try {
+      if (useCloud) return await cloud.del(key);
+      if (artifactStore) {
+        await window.storage.delete(key, true);
+        return true;
+      }
+      return local.del(key);
+    } catch (e) {
+      return false;
+    }
+  },
+
+  async getAll(prefix) {
+    try {
+      if (useCloud) return await cloud.getAll(prefix);
+      const out = {};
+      const keys = await S.list(prefix);
+      const vals = await Promise.all(keys.map((k) => S.get(k)));
+      keys.forEach((k, i) => {
+        if (vals[i] != null) out[k] = vals[i];
+      });
+      return out;
+    } catch (e) {
+      return {};
+    }
+  },
+
+  async list(prefix, shared = true) {
+    try {
+      if (useCloud) return Object.keys(await cloud.getAll(prefix));
+      if (artifactStore) {
+        const r = await window.storage.list(prefix, true);
+        const keys = (r && r.keys) || [];
+        return keys.map((k) => (typeof k === "string" ? k : k.key)).filter(Boolean);
+      }
+      return local.list(prefix);
+    } catch (e) {
+      return [];
+    }
+  },
+};
+
+const storageMode = () => (useCloud ? "cloud" : artifactStore ? "artifact" : "local");
+
+/* ── 이미지 압축 ── */
+const HEIC_CDN = "https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js";
+
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = src;
+    s.onload = () => res();
+    s.onerror = () => rej(new Error("script"));
+    document.head.appendChild(s);
+  });
+}
+
+function viaImageTag(blob) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      res(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      rej(new Error("decode"));
+    };
+    img.src = url;
+  });
+}
+
+function viaDataUrl(blob) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      const img = new Image();
+      img.onload = () => res(img);
+      img.onerror = () => rej(new Error("decode"));
+      img.src = fr.result;
+    };
+    fr.onerror = () => rej(new Error("read"));
+    fr.readAsDataURL(blob);
+  });
+}
+
+const looksHeic = (file) =>
+  /hei[cf]/i.test(file.type || "") || /\.(heic|heif)$/i.test(file.name || "");
+
+/* 브라우저마다 읽을 수 있는 형식이 달라서 차례로 시도한다.
+   아이폰의 큰 사진은 읽으면서 바로 줄이는 방식이 가장 안전하다. */
+async function decodeImage(file) {
+  const tried = [];
+  if (!looksHeic(file)) {
+    if (window.createImageBitmap) {
+      try {
+        return await createImageBitmap(file, { resizeWidth: 1400, resizeQuality: "medium" });
+      } catch (e) {
+        tried.push("bitmap-resize:" + (e && e.name));
+      }
+      try {
+        return await createImageBitmap(file);
+      } catch (e) {
+        tried.push("bitmap:" + (e && e.name));
+      }
+    }
+    try {
+      return await viaDataUrl(file);
+    } catch (e) {
+      tried.push("reader:" + (e && e.message));
+    }
+    try {
+      return await viaImageTag(file);
+    } catch (e) {
+      tried.push("objurl:" + (e && e.message));
+    }
+  }
+
+  // 아이폰 HEIC 사진은 변환기를 그때 불러와서 처리한다
+  try {
+    if (!window.heic2any) await loadScript(HEIC_CDN);
+    const out = await window.heic2any({ blob: file, toType: "image/jpeg", quality: 0.85 });
+    const jpg = Array.isArray(out) ? out[0] : out;
+    if (window.createImageBitmap) {
+      try {
+        return await createImageBitmap(jpg);
+      } catch (e) {}
+    }
+    try {
+      return await viaDataUrl(jpg);
+    } catch (e) {}
+    return await viaImageTag(jpg);
+  } catch (e) {
+    tried.push("heic:" + (e && e.message));
+    const err = new Error(looksHeic(file) ? "heic" : "unsupported");
+    err.detail = tried.join(" / ");
+    throw err;
+  }
+}
+
+async function compressImage(file, maxDim = 760, quality = 0.6) {
+  const src = await decodeImage(file);
+  let w = src.width;
+  let h = src.height;
+  if (!w || !h) throw new Error("unsupported");
+
+  const scale = Math.min(1, maxDim / Math.max(w, h));
+  w = Math.round(w * scale);
+  h = Math.round(h * scale);
+
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(src, 0, 0, w, h);
+    if (src.close) src.close();
+    const out = canvas.toDataURL("image/jpeg", quality);
+    if (!out || out.length < 200) throw new Error("빈 결과");
+    return out;
+  } catch (e) {
+    const err = new Error("canvas");
+    err.detail = "canvas:" + (e && e.message);
+    throw err;
+  }
+}
+
+/* 실패 원인을 학생이 알아볼 수 있게, 그리고 원인을 특정할 수 있게 */
+function photoErrorMessage(e, file) {
+  if (typeof console !== "undefined" && console.warn) {
+    console.warn("photo failed", (file && file.type) || "?", (e && (e.detail || e.message)) || e);
+  }
+  if (e && e.message === "heic")
+    return "이 사진은 못 읽었어요. 사진 찍기로 다시 해보세요";
+  return "이 사진은 못 읽었어요. 다른 사진으로 해보세요";
+}
+
+/* ── 이름 → 글자 슬롯 ── */
+function letterSlots(name) {
+  const out = [];
+  let i = 0;
+  for (const ch of name) {
+    if (ch === " ") out.push({ type: "space" });
+    else out.push({ type: "letter", ch: ch.toUpperCase(), idx: i++ });
+  }
+  return out;
+}
+function letterCount(name) {
+  return name.replace(/\s/g, "").length;
+}
+
+const timeLabel = (ts) => {
+  const d = new Date(ts);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(d.getMonth() + 1)}.${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+
+const SYNC_MS = 7000;
+const HOLD_MS = 25000; // 방금 내가 한 변경은 서버 응답이 늦어도 이만큼 유지
+
+/* 이름 → 저장소 키에 쓸 짧은 문자열 */
+const slug = (s) => {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+};
+
+/* 화면이 켜져 있는 동안 주기적으로 다시 읽어 온다 */
+function usePoll(fn, deps = []) {
+  const saved = useRef(fn);
+  saved.current = fn;
+  useEffect(() => {
+    let stopped = false;
+    let timer = null;
+    const loop = async () => {
+      if (stopped) return;
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        try {
+          await saved.current();
+        } catch (e) {}
+      }
+      if (!stopped) timer = setTimeout(loop, SYNC_MS);
+    };
+    timer = setTimeout(loop, SYNC_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") saved.current();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", onVisible);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+}
+
+/* 서버에서 읽은 값 위에, 방금 이 기기에서 한 변경을 덮어 둔다 */
+function applyRecent(serverMap, recentRef) {
+  const now = Date.now();
+  const out = { ...serverMap };
+  Object.keys(recentRef.current).forEach((k) => {
+    const r = recentRef.current[k];
+    if (now - r.at > HOLD_MS) {
+      delete recentRef.current[k];
+      return;
+    }
+    if (r.value === null) delete out[k];
+    else out[k] = r.value;
+  });
+  return out;
+}
+function markRecent(recentRef, key, value) {
+  recentRef.current[key] = { value, at: Date.now() };
+}
+
+/* ─────────────── 스타일 ─────────────── */
+const CSS = `
+@import url('https://fonts.googleapis.com/css2?family=Gothic+A1:wght@400;700;900&family=Jua&display=swap');
+
+.sf * { box-sizing: border-box; }
+.sf {
+  --ink:#14121F; --paper:#F6F1FF; --line:#14121F;
+  --lime:#D6FF4B; --warn:#FF7A5A; --muted:#6E6A85;
+  font-family:'Gothic A1', -apple-system, BlinkMacSystemFont, sans-serif;
+  color:var(--ink); background:var(--paper);
+  min-height:100vh; -webkit-text-size-adjust:100%;
+}
+.sf-wrap { max-width:520px; margin:0 auto; padding:0 16px 96px; }
+.sf h1,.sf h2,.sf h3 { margin:0; font-weight:900; letter-spacing:-.02em; }
+.sf p { margin:0; }
+.sf button { font-family:inherit; cursor:pointer; }
+.sf :focus-visible { outline:3px solid #6B4EFF; outline-offset:2px; }
+
+/* 카드 */
+.card { background:#fff; border:2.5px solid var(--line); border-radius:14px;
+  box-shadow:5px 5px 0 var(--line); padding:16px; }
+.card + .card { margin-top:14px; }
+.flat { box-shadow:none; }
+
+/* 버튼 */
+.btn { border:2.5px solid var(--line); border-radius:11px; background:#fff; color:var(--ink);
+  font-weight:900; font-size:15px; padding:12px 16px; box-shadow:3px 3px 0 var(--line);
+  transition:transform .08s ease, box-shadow .08s ease; }
+.btn:active { transform:translate(3px,3px); box-shadow:0 0 0 var(--line); }
+.btn:disabled { opacity:.45; cursor:not-allowed; box-shadow:3px 3px 0 var(--line); }
+.btn-fill { background:var(--accent,#6B4EFF); color:#fff; }
+.btn-lime { background:var(--lime); }
+.btn-sm { padding:8px 12px; font-size:13px; border-width:2px; box-shadow:2px 2px 0 var(--line); border-radius:9px; }
+.btn-ghost { background:transparent; box-shadow:none; border:none; font-weight:700;
+  color:var(--muted); padding:8px; font-size:13px; text-decoration:underline; }
+.btn-row { display:flex; gap:8px; flex-wrap:wrap; }
+
+/* 입력 */
+.inp { width:100%; border:2.5px solid var(--line); border-radius:11px; padding:12px 14px;
+  font-family:inherit; font-size:16px; font-weight:700; background:#fff; color:var(--ink); }
+.inp::placeholder { color:#A9A5BD; font-weight:400; }
+textarea.inp { resize:vertical; min-height:74px; line-height:1.5; }
+
+/* 헤더 */
+.top { position:sticky; top:0; z-index:30; background:var(--paper);
+  border-bottom:2.5px solid var(--line); }
+.top-in { max-width:520px; margin:0 auto; padding:12px 16px;
+  display:flex; align-items:center; gap:10px; }
+.mark { font-family:'Jua',sans-serif; font-size:19px; line-height:1; letter-spacing:0; }
+.chip { border:2px solid var(--line); border-radius:999px; padding:4px 10px;
+  font-size:12px; font-weight:900; background:#fff; white-space:nowrap; }
+
+/* 탭 */
+.tabs { display:flex; gap:6px; padding:10px 0 14px; }
+.tab { flex:1; border:2.5px solid var(--line); border-radius:11px; background:#fff;
+  padding:10px 4px; font-weight:900; font-size:13px; line-height:1.25; }
+.tab[aria-selected="true"] { background:var(--accent,#6B4EFF); color:#fff; box-shadow:3px 3px 0 var(--line); }
+
+/* 글자 타일 */
+.tiles { display:flex; flex-wrap:wrap; gap:9px; }
+.gap { width:100%; height:0; }
+.tile { position:relative; width:66px; height:78px; border:2.5px solid var(--line);
+  border-radius:12px; background:#fff; box-shadow:3px 3px 0 var(--line); padding:0;
+  overflow:hidden; display:flex; align-items:center; justify-content:center;
+  font-family:'Jua',sans-serif; font-size:34px; color:#C6C1DC; }
+.tile.done { color:#fff; }
+.tile img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+.tile .badge { position:absolute; left:0; bottom:0; background:var(--ink); color:#fff;
+  font-family:'Jua',sans-serif; font-size:16px; line-height:1; padding:4px 7px; border-top-right-radius:9px; }
+.tile .plus { position:absolute; right:5px; top:4px; font-family:'Gothic A1',sans-serif;
+  font-size:11px; font-weight:900; color:#A9A5BD; }
+
+/* 진행바 */
+.bar { height:14px; border:2.5px solid var(--line); border-radius:999px; background:#fff; overflow:hidden; }
+.bar > i { display:block; height:100%; background:var(--accent,#6B4EFF); transition:width .35s ease; }
+
+/* 목록·기타 */
+.row { display:flex; align-items:center; gap:10px; }
+.between { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.mini { font-size:12.5px; color:var(--muted); font-weight:700; }
+.label { font-size:13.5px; font-weight:900; margin-bottom:7px; }
+.hr { height:2px; background:#EAE6F5; border:0; margin:14px 0; }
+.thumb { width:100%; border:2.5px solid var(--line); border-radius:11px; display:block;
+  object-fit:cover; background:#EFECF9; }
+.empty { border:2.5px dashed #B9B4D0; border-radius:14px; padding:22px 16px; text-align:center;
+  color:var(--muted); font-weight:700; font-size:14px; background:#fff; line-height:1.6; }
+
+.tag { display:inline-block; border:2px solid var(--line); border-radius:999px;
+  padding:3px 9px; font-size:11.5px; font-weight:900; background:var(--lime); }
+
+.sheet-bg { position:fixed; inset:0; background:rgba(20,18,31,.6); z-index:60;
+  display:flex; align-items:flex-end; justify-content:center; padding:0; }
+.sheet { background:#fff; border-top:3px solid var(--line); border-radius:20px 20px 0 0;
+  width:100%; max-width:520px; padding:18px 16px 26px; max-height:88vh; overflow:auto; }
+.lightbox { position:fixed; inset:0; background:rgba(20,18,31,.9); z-index:80;
+  display:flex; align-items:center; justify-content:center; padding:18px; }
+.lightbox img { max-width:100%; max-height:84vh; border-radius:12px; border:3px solid #fff; }
+
+.toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); z-index:90;
+  background:var(--ink); color:#fff; font-weight:900; font-size:14px;
+  padding:11px 18px; border-radius:999px; box-shadow:0 6px 18px rgba(20,18,31,.35); }
+
+.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+.keypad { display:grid; grid-template-columns:repeat(3,1fr); gap:9px; }
+.key { border:2.5px solid var(--line); border-radius:12px; background:#fff; padding:14px 0;
+  font-family:'Jua',sans-serif; font-size:23px; box-shadow:3px 3px 0 var(--line); }
+.key:active { transform:translate(3px,3px); box-shadow:0 0 0 var(--line); }
+.dots { display:flex; gap:11px; justify-content:center; margin:16px 0 20px; }
+.dot { width:44px; height:56px; border:2.5px solid var(--line); border-radius:11px; background:#fff;
+  display:flex; align-items:center; justify-content:center; font-family:'Jua',sans-serif; font-size:26px;
+  box-shadow:3px 3px 0 var(--line); }
+
+@keyframes pop { 0%{transform:scale(.86)} 60%{transform:scale(1.06)} 100%{transform:scale(1)} }
+.pop { animation:pop .4s ease both; }
+@media (prefers-reduced-motion: reduce) { .pop { animation:none; } .bar > i { transition:none; } }
+`;
+
+/* ─────────────── 작은 조각들 ─────────────── */
+function Toast({ msg }) {
+  if (!msg) return null;
+  return <div className="toast">{msg}</div>;
+}
+
+function SyncBadge() {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const h = () => bump((x) => x + 1);
+    SyncBus.subs.add(h);
+    const t = setInterval(h, 20000);
+    return () => {
+      SyncBus.subs.delete(h);
+      clearInterval(t);
+    };
+  }, []);
+
+  const { state, at } = SyncBus;
+  if (state === "idle") return null;
+
+  const look =
+    state === "saving"
+      ? { bg: "#fff", text: "저장 중" }
+      : state === "fail"
+      ? { bg: "#FFE0D8", text: "저장 실패" }
+      : { bg: "#EAF9D8", text: `저장됨 ${timeLabel(at).slice(6)}` };
+
+  return (
+    <span
+      className="chip"
+      style={{ background: look.bg, fontSize: 11, padding: "3px 8px", fontWeight: 900 }}
+      title={state === "fail" ? "인터넷 연결을 확인하고 다시 시도하세요" : ""}
+    >
+      {look.text}
+    </span>
+  );
+}
+
+function Lightbox({ src, onClose }) {
+  if (!src) return null;
+  return (
+    <div className="lightbox" onClick={onClose} role="dialog" aria-label="사진 크게 보기">
+      <img src={src} alt="" />
+    </div>
+  );
+}
+
+function Progress({ done, total, color }) {
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  return (
+    <div>
+      <div className="between" style={{ marginBottom: 7 }}>
+        <span className="mini">
+          {done} / {total} 글자
+        </span>
+        <span className="mini">{pct}%</span>
+      </div>
+      <div className="bar" style={{ "--accent": color }}>
+        <i style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+/* 사진 고르기 버튼 (카메라/앨범)
+   주의: 처리가 끝나기 전에 input.value를 비우면 아이폰 사파리에서
+   사진 데이터가 함께 무효가 된다. 반드시 처리 후에 비운다. */
+function PhotoPicker({ onPick, children, className = "btn btn-sm", capture }) {
+  const ref = useRef(null);
+  return (
+    <>
+      <button
+        type="button"
+        className={className}
+        onClick={() => ref.current && ref.current.click()}
+      >
+        {children}
+      </button>
+      <input
+        ref={ref}
+        type="file"
+        accept="image/*"
+        {...(capture ? { capture: "environment" } : {})}
+        style={{ display: "none" }}
+        onChange={async (e) => {
+          const input = e.target;
+          const f = input.files && input.files[0];
+          if (!f) return;
+          try {
+            await onPick(f);
+          } finally {
+            input.value = "";
+          }
+        }}
+      />
+    </>
+  );
+}
+
+/* ─────────────── 앱 설정(선생님용) ─────────────── */
+function Setup({ onClose }) {
+  const [project, setProject] = useState((CFG && CFG.project) || "");
+  const [key, setKey] = useState((CFG && CFG.key) || "");
+  const [state, setState] = useState("idle"); // idle | testing | ok | fail
+  const [msg, setMsg] = useState("");
+  const [copied, setCopied] = useState(false);
+
+  const test = async () => {
+    const p = project.trim().replace(/\s+/g, "");
+    const k = key.replace(/\s+/g, "");
+    if (!p || !k) {
+      setState("fail");
+      setMsg("두 칸을 모두 채워 주세요.");
+      return;
+    }
+    if (window.location.protocol === "file:") {
+      setState("fail");
+      setMsg(
+        "지금 파일을 직접 열어 둔 상태라 브라우저가 연결을 막습니다. 인터넷에 올려둔 주소로 들어가서 설정해 주세요."
+      );
+      return;
+    }
+
+    setState("testing");
+    setMsg("");
+
+    const base = `https://firestore.googleapis.com/v1/projects/${p}/databases/(default)/documents`;
+    const url = `${base}/misc/__test?key=${encodeURIComponent(k)}`;
+
+    // 1) 쓰기
+    let w;
+    try {
+      w = await fetch(url, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fields: { k: { stringValue: "__test" }, v: { stringValue: String(Date.now()) } },
+        }),
+      });
+    } catch (e) {
+      setState("fail");
+      setMsg(
+        `1단계 실패: 구글 서버에 닿지 못했습니다 (${(e && e.name) || "오류"}). 인터넷 연결을 확인하세요.`
+      );
+      return;
+    }
+
+    if (!w.ok) {
+      const t = (await w.text()).slice(0, 140);
+      setState("fail");
+      if (w.status === 400 || w.status === 404)
+        setMsg("프로젝트 ID가 맞지 않거나 데이터베이스를 아직 만들지 않았습니다. Firestore Database를 먼저 만들어 주세요.");
+      else if (w.status === 403 && /PERMISSION_DENIED/i.test(t))
+        setMsg("쓰기 권한이 없습니다. Firestore 규칙을 테스트 모드로 바꿔 주세요.");
+      else if (w.status === 403 || w.status === 401)
+        setMsg("API 키가 맞지 않습니다. 웹 API 키를 다시 복사해 주세요.");
+      else setMsg(`저장이 거절됐습니다 (${w.status}): ${t}`);
+      return;
+    }
+
+    // 2) 읽기
+    try {
+      const r = await fetch(url, {});
+      if (!r.ok) {
+        setState("fail");
+        setMsg(`2단계 실패: 저장은 됐는데 읽기가 안 됩니다 (${r.status}).`);
+        return;
+      }
+    } catch (e) {
+      setState("fail");
+      setMsg("2단계 실패: 읽기 요청이 막혔습니다.");
+      return;
+    }
+
+    saveConfig(p, k);
+    setState("ok");
+    setMsg("");
+  };
+
+  const link = state === "ok" ? shareLink() : "";
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <div className="sf-wrap" style={{ paddingTop: 24 }}>
+      <div className="between" style={{ marginBottom: 16 }}>
+        <h1 className="mark" style={{ fontSize: 24 }}>
+          앱 설정
+        </h1>
+        <button className="btn-ghost" onClick={onClose}>
+          돌아가기
+        </button>
+      </div>
+
+      <div className="card">
+        <p className="mini" style={{ lineHeight: 1.75, marginBottom: 14 }}>
+          Firebase에서 복사한 값을 붙여넣고 아래 버튼을 누르세요. 선생님 기기에서 한 번만 하면
+          됩니다.
+        </p>
+
+        <p className="label">1. 프로젝트 ID</p>
+        <input
+          className="inp"
+          value={project}
+          onChange={(e) => setProject(e.target.value)}
+          placeholder="starfield-a1b2c"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck="false"
+          style={{ marginBottom: 14, fontSize: 14 }}
+        />
+
+        <p className="label">2. 웹 API 키</p>
+        <textarea
+          className="inp"
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          placeholder="AIza..."
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck="false"
+          style={{ fontSize: 13, minHeight: 72 }}
+        />
+
+        <button
+          className="btn btn-fill"
+          style={{ marginTop: 14, width: "100%", "--accent": "#6B4EFF" }}
+          onClick={test}
+          disabled={state === "testing"}
+        >
+          {state === "testing" ? "확인하는 중…" : "연결 확인하고 저장"}
+        </button>
+
+        {state === "fail" && (
+          <div
+            style={{
+              marginTop: 14,
+              background: "#FFE9E2",
+              border: "2.5px solid #14121F",
+              borderRadius: 11,
+              padding: "12px 14px",
+              fontWeight: 700,
+              fontSize: 13.5,
+              lineHeight: 1.65,
+            }}
+          >
+            {msg}
+          </div>
+        )}
+      </div>
+
+      {state === "ok" && (
+        <>
+          <div className="card" style={{ background: "#EAF9D8" }}>
+            <h2 style={{ fontSize: 18, marginBottom: 6 }}>연결됐습니다</h2>
+            <p className="mini" style={{ lineHeight: 1.7 }}>
+              학생들에게는 아래 주소를 나눠 주세요. 이 주소로 들어와야 사진이 서로 공유됩니다.
+            </p>
+          </div>
+
+          <div className="card">
+            <p className="label">학생들에게 줄 주소</p>
+            <p
+              style={{
+                fontSize: 12.5,
+                fontWeight: 700,
+                wordBreak: "break-all",
+                background: "#F2EFFB",
+                border: "2px solid #14121F",
+                borderRadius: 9,
+                padding: "10px 12px",
+                lineHeight: 1.6,
+              }}
+            >
+              {link}
+            </p>
+            <div className="btn-row" style={{ marginTop: 12 }}>
+              <button className="btn btn-sm btn-lime" onClick={copy}>
+                {copied ? "복사했어요" : "주소 복사"}
+              </button>
+              <button
+                className="btn btn-sm"
+                onClick={() => {
+                  window.location.href = link;
+                }}
+              >
+                이 주소로 열기
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      <div className="card flat">
+        <p className="label">아직 Firebase를 안 만드셨다면</p>
+        <p className="mini" style={{ lineHeight: 1.8 }}>
+          console.firebase.google.com 접속 → 프로젝트 만들기 → Firestore Database 만들기(테스트
+          모드) → 프로젝트 설정에서 프로젝트 ID와 웹 API 키 복사. 이 순서대로 한 뒤 여기로
+          돌아오세요.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────── 로그인 ─────────────── */
+function Login({ onLogin, onSetup }) {
+  const [code, setCode] = useState("");
+  const [err, setErr] = useState("");
+
+  const push = (n) => {
+    setErr("");
+    setCode((c) => (c.length >= 4 ? c : c + n));
+  };
+  const back = () => {
+    setErr("");
+    setCode((c) => c.slice(0, -1));
+  };
+
+  const submit = () => {
+    const tCls = TEACHER_CODES[code];
+    if (tCls)
+      return onLogin({
+        role: "teacher",
+        cls: tCls,
+        name: CLASSES[tCls].teacherName,
+      });
+    const found = CODE_MAP[code];
+    if (!found) {
+      setErr("그런 코드는 없어요. 담임 선생님께 코드를 다시 확인하세요.");
+      setCode("");
+      return;
+    }
+    onLogin({ role: "student", code, ...found });
+  };
+
+  useEffect(() => {
+    const teacherPrefix = Object.keys(TEACHER_CODES).some((c) => c.startsWith(code));
+    if (code.length === 3 && !CODE_MAP[code] && teacherPrefix) return;
+    if (code.length === 3 && CODE_MAP[code]) submit();
+    if (code.length === 4) submit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [code]);
+
+  return (
+    <div className="sf-wrap" style={{ paddingTop: 30 }}>
+      <div style={{ textAlign: "center", marginBottom: 22 }}>
+        <p className="mini" style={{ marginBottom: 8 }}>한수중학교 1학년 현장체험학습</p>
+        <h1 className="mark" style={{ fontSize: 34, lineHeight: 1.25 }}>
+          고양 스타필드
+          <br />
+          미션 대작전
+        </h1>
+      </div>
+
+      <div className="card">
+        <p className="label" style={{ textAlign: "center", marginBottom: 4 }}>
+          우리 모둠 코드를 누르세요
+        </p>
+        <p className="mini" style={{ textAlign: "center" }}>숫자 세 자리</p>
+
+        <div className="dots">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="dot">
+              {code[i] ? "●" : ""}
+            </div>
+          ))}
+        </div>
+
+        <div className="keypad">
+          {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((n) => (
+            <button key={n} className="key" onClick={() => push(n)}>
+              {n}
+            </button>
+          ))}
+          <button className="key" onClick={back} style={{ fontSize: 15, fontFamily: "'Gothic A1'", fontWeight: 900 }}>
+            지우기
+          </button>
+          <button className="key" onClick={() => push("0")}>
+            0
+          </button>
+          <button
+            className="key"
+            onClick={submit}
+            style={{ fontSize: 15, fontFamily: "'Gothic A1'", fontWeight: 900, background: "#D6FF4B" }}
+          >
+            입장
+          </button>
+        </div>
+
+        {err && (
+          <p style={{ marginTop: 14, color: "#D6360F", fontWeight: 900, fontSize: 13.5, textAlign: "center" }}>
+            {err}
+          </p>
+        )}
+      </div>
+
+      {storageMode() === "local" && (
+        <div className="card" style={{ background: "#FFE9E2", marginTop: 14 }}>
+          <p style={{ fontWeight: 900, fontSize: 14, marginBottom: 6 }}>
+            아직 기기끼리 연결되지 않았어요
+          </p>
+          <p className="mini" style={{ lineHeight: 1.7, marginBottom: 12 }}>
+            지금은 이 기기에만 저장됩니다. 아래 버튼을 눌러 Firebase 정보를 붙여넣으면 모든
+            학생 폰과 내용이 공유됩니다.
+          </p>
+          <button className="btn btn-sm btn-fill" style={{ "--accent": "#14121F" }} onClick={onSetup}>
+            지금 설정하기
+          </button>
+        </div>
+      )}
+
+      <p className="mini" style={{ textAlign: "center", marginTop: 18, lineHeight: 1.7 }}>
+        코드를 모르면 담임 선생님께 물어보세요.
+        <br />
+        담임 선생님은 각자의 네 자리 코드를 누르세요.
+      </p>
+
+      <p style={{ textAlign: "center", marginTop: 8 }}>
+        <button className="btn-ghost" onClick={onSetup}>
+          앱 설정
+        </button>
+      </p>
+
+      <p
+        style={{
+          textAlign: "center",
+          marginTop: 4,
+          fontSize: 12,
+          fontWeight: 900,
+          color: "#fff",
+          background: "#14121F",
+          borderRadius: 999,
+          padding: "5px 0",
+          maxWidth: 140,
+          marginLeft: "auto",
+          marginRight: "auto",
+        }}
+      >
+        버전 {APP_VERSION}
+      </p>
+    </div>
+  );
+}
+
+/* ─────────────── 모둠원 입력 ─────────────── */
+function MembersCard({ code, color, members, setMembers, me, setMe, toast }) {
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const add = async () => {
+    const name = draft.trim();
+    if (!name) return;
+    if (members.includes(name)) {
+      toast("이미 있는 이름이에요");
+      return;
+    }
+    setDraft("");
+    setBusy(true);
+    setMembers([...members, name]);
+    await S.set(`mem:${code}:${slug(name)}`, { name, ts: Date.now() });
+    setBusy(false);
+    if (!me) pickMe(name);
+  };
+
+  const remove = async (name) => {
+    setMembers(members.filter((n) => n !== name));
+    await S.del(`mem:${code}:${slug(name)}`);
+    if (me === name) pickMe("");
+  };
+
+  const pickMe = async (name) => {
+    setMe(name);
+    await S.set(`me:${code}`, name, false);
+  };
+
+  return (
+    <div className="card">
+      <div className="between" style={{ marginBottom: 10 }}>
+        <h2 style={{ fontSize: 17 }}>우리 모둠원</h2>
+        <span className="mini">{members.length}명</span>
+      </div>
+
+      {members.length === 0 && (
+        <p className="mini" style={{ marginBottom: 10, lineHeight: 1.6 }}>
+          모둠원 이름을 모두 적어 주세요. 사진을 올릴 때 누가 찾았는지 표시됩니다.
+        </p>
+      )}
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 12 }}>
+        {members.map((n) => (
+          <span
+            key={n}
+            className="chip"
+            style={{
+              background: me === n ? color : "#fff",
+              color: me === n ? "#fff" : "var(--ink)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 7,
+            }}
+          >
+            <button
+              onClick={() => pickMe(n)}
+              style={{ all: "unset", cursor: "pointer" }}
+              title="나로 선택"
+            >
+              {n}
+              {me === n ? " (나)" : ""}
+            </button>
+            <button
+              onClick={() => remove(n)}
+              aria-label={`${n} 지우기`}
+              style={{
+                all: "unset",
+                cursor: "pointer",
+                fontSize: 13,
+                opacity: 0.65,
+              }}
+            >
+              ✕
+            </button>
+          </span>
+        ))}
+      </div>
+
+      <div className="row">
+        <input
+          className="inp"
+          value={draft}
+          placeholder="이름 입력"
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && add()}
+        />
+        <button className="btn btn-lime" onClick={add} disabled={busy}>
+          추가
+        </button>
+      </div>
+
+      {members.length > 0 && (
+        <p className="mini" style={{ marginTop: 10 }}>
+          이름을 누르면 &lsquo;나&rsquo;로 표시됩니다. 지금 나: {me || "고르지 않음"}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* ─────────────── 미션 1 ─────────────── */
+function Mission1({ code, cls, color, me, toast, onZoom }) {
+  const teacher = CLASSES[cls].teacher;
+  const slots = letterSlots(teacher);
+  const total = letterCount(teacher);
+  const [shots, setShots] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [celebrated, setCelebrated] = useState(false);
+  const recent = useRef({});
+  const prefix = `m1:${code}:`;
+
+  const pull = useCallback(async () => {
+    const raw = await S.getAll(prefix);
+    const merged = applyRecent(raw, recent);
+    const next = {};
+    Object.keys(merged).forEach((k) => {
+      next[k.slice(prefix.length)] = merged[k];
+    });
+    setShots(next);
+    setLoading(false);
+    if (Object.keys(next).length >= total) setCelebrated(true);
+  }, [prefix, total]);
+
+  useEffect(() => {
+    pull();
+  }, [pull]);
+  usePoll(pull, [prefix]);
+
+  const done = Object.keys(shots).length;
+
+  const upload = async (idx, file) => {
+    setBusy(true);
+    try {
+      const img = await compressImage(file);
+      const entry = { img, by: me || "", ts: Date.now() };
+      markRecent(recent, prefix + idx, entry);
+      setShots((s) => ({ ...s, [idx]: entry }));
+      setOpen(null);
+      const ok = await S.set(prefix + idx, entry);
+      toast(ok ? "사진을 올렸어요" : "저장 실패: " + (LAST_ERROR || "원인 불명"));
+    } catch (e) {
+      toast(photoErrorMessage(e, file));
+    }
+    setBusy(false);
+  };
+
+  const remove = async (idx) => {
+    setBusy(true);
+    markRecent(recent, prefix + idx, null);
+    setShots((s) => {
+      const n = { ...s };
+      delete n[idx];
+      return n;
+    });
+    setCelebrated(false);
+    setOpen(null);
+    await S.del(prefix + idx);
+    setBusy(false);
+    toast("사진을 지웠어요");
+  };
+
+  const cur = open != null ? shots[open] : null;
+  const curCh =
+    open != null ? slots.filter((s) => s.type === "letter").find((s) => s.idx === open)?.ch : "";
+
+  return (
+    <>
+      <div className="card" style={{ "--accent": color }}>
+        <span className="tag" style={{ background: color, color: "#fff" }}>
+          미션 1
+        </span>
+        <h2 style={{ fontSize: 20, margin: "10px 0 6px" }}>간판에서 선생님 이름 찾기</h2>
+        <p className="mini" style={{ lineHeight: 1.65 }}>
+          스타필드 안 간판·포스터·메뉴판에서 아래 알파벳을 하나씩 찾아 사진을 찍으세요. 글자를 다
+          모으면 담임 선생님 이름이 완성됩니다.
+        </p>
+
+        <div className="hr" />
+
+        <p className="label" style={{ marginBottom: 4 }}>
+          우리 반 담임 선생님
+        </p>
+        <p style={{ fontFamily: "'Jua',sans-serif", fontSize: 30, color, marginBottom: 14 }}>
+          {teacher}
+        </p>
+
+        <Progress done={done} total={total} color={color} />
+      </div>
+
+      <div className="card">
+        {loading ? (
+          <p className="mini">불러오는 중…</p>
+        ) : (
+          <>
+            <div className="tiles">
+              {slots.map((s, i) =>
+                s.type === "space" ? (
+                  <span key={`sp${i}`} className="gap" />
+                ) : (
+                  <button
+                    key={s.idx}
+                    className={`tile ${shots[s.idx] ? "done" : ""}`}
+                    onClick={() => setOpen(s.idx)}
+                    aria-label={`${s.ch} 글자 사진`}
+                  >
+                    {shots[s.idx] ? (
+                      <>
+                        <img src={shots[s.idx].img} alt="" />
+                        <span className="badge">{s.ch}</span>
+                      </>
+                    ) : (
+                      <>
+                        {s.ch}
+                        <span className="plus">찍기</span>
+                      </>
+                    )}
+                  </button>
+                )
+              )}
+            </div>
+
+            {done >= total && (
+              <div
+                className="pop"
+                style={{
+                  marginTop: 16,
+                  background: color,
+                  color: "#fff",
+                  borderRadius: 12,
+                  padding: "14px 16px",
+                  textAlign: "center",
+                  fontWeight: 900,
+                }}
+              >
+                이름 완성! {teacher} 선생님을 다 찾았어요 🎉
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {open != null && (
+        <div className="sheet-bg" onClick={() => !busy && setOpen(null)}>
+          <div className="sheet" onClick={(e) => e.stopPropagation()}>
+            <div className="between" style={{ marginBottom: 14 }}>
+              <h3 style={{ fontSize: 18 }}>
+                <span style={{ fontFamily: "'Jua',sans-serif", fontSize: 26, color }}>{curCh}</span>{" "}
+                글자 사진
+              </h3>
+              <button className="btn-ghost" onClick={() => setOpen(null)}>
+                닫기
+              </button>
+            </div>
+
+            {cur ? (
+              <>
+                <img
+                  className="thumb"
+                  src={cur.img}
+                  alt=""
+                  style={{ maxHeight: 320 }}
+                  onClick={() => onZoom(cur.img)}
+                />
+                <p className="mini" style={{ margin: "10px 0 14px" }}>
+                  {cur.by ? `${cur.by}이(가) 올림 · ` : ""}
+                  {timeLabel(cur.ts)}
+                </p>
+              </>
+            ) : (
+              <p className="empty" style={{ marginBottom: 14 }}>
+                간판에서 {curCh} 를 찾아 사진을 찍으세요.
+                <br />
+                글자가 크고 또렷하게 나오면 좋아요.
+              </p>
+            )}
+
+            <div className="btn-row">
+              <PhotoPicker
+                capture
+                className="btn btn-fill"
+                onPick={(f) => upload(open, f)}
+              >
+                {cur ? "다시 찍기" : "사진 찍기"}
+              </PhotoPicker>
+              <PhotoPicker className="btn" onPick={(f) => upload(open, f)}>
+                앨범에서 고르기
+              </PhotoPicker>
+              {cur && (
+                <button className="btn" onClick={() => remove(open)} disabled={busy}>
+                  지우기
+                </button>
+              )}
+            </div>
+            {busy && <p className="mini" style={{ marginTop: 12 }}>올리는 중…</p>}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ─────────────── 미션 2 ─────────────── */
+function Mission2({ code, color, me, toast, onZoom }) {
+  const [photos, setPhotos] = useState([]);
+  const [answers, setAnswers] = useState({});
+  const [draft, setDraft] = useState({});
+  const [loading, setLoading] = useState(true);
+  const touched = useRef({});
+  const recent = useRef({});
+  const prefix = `m2:${code}:`;
+
+  const pull = useCallback(async () => {
+    const [pMap, aRaw] = await Promise.all([S.getAll("m2photo:"), S.getAll(prefix)]);
+    const list = [];
+    for (let i = 0; i < M2_SLOTS; i++) list.push(pMap[`m2photo:${i}`] || null);
+    setPhotos(list);
+
+    const merged = applyRecent(aRaw, recent);
+    const a = {};
+    Object.keys(merged).forEach((k) => {
+      a[k.slice(prefix.length)] = merged[k];
+    });
+    setAnswers(a);
+    setDraft((d) => {
+      const next = { ...d };
+      Object.keys(a).forEach((k) => {
+        if (!touched.current[k]) next[k] = a[k].answer; // 입력 중인 칸은 건드리지 않는다
+      });
+      return next;
+    });
+    setLoading(false);
+  }, [prefix]);
+
+  useEffect(() => {
+    pull();
+  }, [pull]);
+  usePoll(pull, [prefix]);
+
+  const save = async (i) => {
+    const text = (draft[i] || "").trim();
+    if (!text) return;
+    const entry = { answer: text, by: me || "", ts: Date.now() };
+    markRecent(recent, prefix + i, entry);
+    setAnswers((a) => ({ ...a, [i]: entry }));
+    touched.current[i] = false;
+    const ok = await S.set(prefix + i, entry);
+    toast(ok ? "답을 저장했어요" : "저장 실패: " + (LAST_ERROR || "원인 불명"));
+  };
+
+  const answered = Object.keys(answers).filter((k) => answers[k].answer).length;
+  const live = photos.filter((p) => p && p.img);
+
+  return (
+    <>
+      <div className="card" style={{ "--accent": color }}>
+        <span className="tag" style={{ background: color, color: "#fff" }}>
+          미션 2
+        </span>
+        <h2 style={{ fontSize: 20, margin: "10px 0 6px" }}>이 장소는 어디일까</h2>
+        <p className="mini" style={{ lineHeight: 1.65 }}>
+          선생님이 올린 사진 다섯 장을 보고, 스타필드 안 어디인지 찾아서 적으세요. 층수와 가게
+          이름까지 쓰면 더 좋아요.
+        </p>
+        {live.length > 0 && (
+          <>
+            <div className="hr" />
+            <Progress done={answered} total={live.length} color={color} />
+          </>
+        )}
+      </div>
+
+      {loading ? (
+        <div className="card">
+          <p className="mini">불러오는 중…</p>
+        </div>
+      ) : live.length === 0 ? (
+        <div className="empty">
+          아직 사진이 올라오지 않았어요.
+          <br />
+          선생님이 올리면 여기에 다섯 장이 나타납니다.
+        </div>
+      ) : (
+        live.map((p, i) => (
+          <div className="card" key={p.id || i}>
+            <div className="between" style={{ marginBottom: 10 }}>
+              <h3 style={{ fontSize: 16 }}>{i + 1}번 사진</h3>
+              {answers[i] && <span className="tag">제출함</span>}
+            </div>
+            <img
+              className="thumb"
+              src={p.img}
+              alt={`${i + 1}번 장소 사진`}
+              style={{ maxHeight: 260, marginBottom: 12 }}
+              onClick={() => onZoom(p.img)}
+            />
+            {p.hint && (
+              <p className="mini" style={{ marginBottom: 10 }}>
+                힌트 · {p.hint}
+              </p>
+            )}
+            <input
+              className="inp"
+              placeholder="예) 지하 1층 푸드코트 옆 분수대"
+              value={draft[i] || ""}
+              onChange={(e) => {
+                touched.current[i] = true;
+                setDraft({ ...draft, [i]: e.target.value });
+              }}
+              onKeyDown={(e) => e.key === "Enter" && save(i)}
+            />
+            <div className="between" style={{ marginTop: 10 }}>
+              <span className="mini">
+                {answers[i]
+                  ? `${answers[i].by ? answers[i].by + " · " : ""}${timeLabel(answers[i].ts)}`
+                  : "아직 답을 안 냈어요"}
+              </span>
+              <button
+                className="btn btn-sm btn-lime"
+                onClick={() => save(i)}
+                disabled={!(draft[i] || "").trim()}
+              >
+                {answers[i] ? "고쳐서 내기" : "답 내기"}
+              </button>
+            </div>
+          </div>
+        ))
+      )}
+    </>
+  );
+}
+
+/* ─────────────── 게시판 ─────────────── */
+/* 글 하나 = 키 하나, 답글 하나 = 키 하나.
+   그래야 여러 명이 동시에 올려도 서로 지우지 않는다. */
+async function loadBoard() {
+  const [postMap, replyMap] = await Promise.all([S.getAll("post:"), S.getAll("re:")]);
+
+  const posts = Object.keys(postMap)
+    .map((k) => postMap[k])
+    .filter((p) => p && p.id)
+    .sort((a, b) => b.ts - a.ts);
+
+  const replies = {};
+  Object.keys(replyMap).forEach((k) => {
+    const r = replyMap[k];
+    if (!r || !r.postId) return;
+    (replies[r.postId] = replies[r.postId] || []).push(r);
+  });
+  Object.keys(replies).forEach((id) => replies[id].sort((a, b) => a.ts - b.ts));
+
+  return { posts, replies };
+}
+
+function PostCard({ post, replies, canReply, onZoom, onReply, onDelete }) {
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const cInfo = CLASSES[post.cls];
+
+  const send = async () => {
+    const t = text.trim();
+    if (!t) return;
+    setBusy(true);
+    await onReply(post.id, t);
+    setText("");
+    setBusy(false);
+  };
+
+  return (
+    <div className="card">
+      <div className="between" style={{ marginBottom: 10 }}>
+        <div className="row">
+          <span className="chip" style={{ background: cInfo.color, color: "#fff", border: "2px solid #14121F" }}>
+            {post.cls}반 {post.group}모둠
+          </span>
+          <span style={{ fontWeight: 900, fontSize: 14 }}>{post.author || "익명"}</span>
+        </div>
+        <span className="mini">{timeLabel(post.ts)}</span>
+      </div>
+
+      {post.img && (
+        <img
+          className="thumb"
+          src={post.img}
+          alt=""
+          style={{ maxHeight: 300, marginBottom: 10 }}
+          onClick={() => onZoom(post.img)}
+        />
+      )}
+      {post.text && (
+        <p style={{ fontSize: 15, lineHeight: 1.65, fontWeight: 700, whiteSpace: "pre-wrap" }}>
+          {post.text}
+        </p>
+      )}
+
+      {(replies || []).length > 0 && (
+        <div style={{ marginTop: 12, borderLeft: "3px solid #EAE6F5", paddingLeft: 12 }}>
+          {replies.map((r, i) => (
+            <div key={i} style={{ marginBottom: 8 }}>
+              <p className="mini" style={{ marginBottom: 3 }}>
+                {r.teacher ? (
+                  <span
+                    className="chip"
+                    style={{
+                      background: (CLASSES[r.cls] && CLASSES[r.cls].color) || "#14121F",
+                      color: "#fff",
+                      fontSize: 11,
+                      padding: "2px 8px",
+                      marginRight: 6,
+                    }}
+                  >
+                    {r.by}
+                  </span>
+                ) : (
+                  <>{r.by} · </>
+                )}
+                {timeLabel(r.ts)}
+              </p>
+              <p style={{ fontSize: 14, fontWeight: 700, lineHeight: 1.6 }}>{r.text}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {canReply && (
+        <div className="row" style={{ marginTop: 12 }}>
+          <input
+            className="inp"
+            placeholder="답글 쓰기"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && send()}
+          />
+          <button className="btn btn-sm btn-lime" onClick={send} disabled={busy || !text.trim()}>
+            남기기
+          </button>
+        </div>
+      )}
+
+      {onDelete && (
+        <button className="btn-ghost" style={{ marginTop: 8 }} onClick={() => onDelete(post)}>
+          이 글 지우기
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Board({ session, me, color, toast, onZoom }) {
+  const [posts, setPosts] = useState([]);
+  const [replies, setReplies] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [text, setText] = useState("");
+  const [img, setImg] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [filter, setFilter] = useState("all");
+
+  const isTeacher = session.role === "teacher";
+
+  const mine = useRef({ posts: [], replies: [] });
+
+  const pull = useCallback(async () => {
+    const { posts, replies } = await loadBoard();
+    const now = Date.now();
+
+    // 방금 이 기기에서 올린 것이 아직 안 읽혔으면 끼워 넣는다
+    mine.current.posts = mine.current.posts.filter((p) => now - p.ts < HOLD_MS);
+    mine.current.replies = mine.current.replies.filter((r) => now - r.ts < HOLD_MS);
+
+    const ids = new Set(posts.map((p) => p.id));
+    const all = [...posts, ...mine.current.posts.filter((p) => !ids.has(p.id))].sort(
+      (a, b) => b.ts - a.ts
+    );
+
+    const merged = { ...replies };
+    mine.current.replies.forEach((r) => {
+      const list = merged[r.postId] || [];
+      if (!list.some((x) => x.ts === r.ts && x.by === r.by)) {
+        merged[r.postId] = [...list, r].sort((a, b) => a.ts - b.ts);
+      }
+    });
+
+    setPosts(all);
+    setReplies(merged);
+    setLoading(false);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    await pull();
+  }, [pull]);
+
+  useEffect(() => {
+    pull();
+  }, [pull]);
+  usePoll(pull, []);
+
+  const pick = async (file) => {
+    try {
+      setBusy(true);
+      setImg(await compressImage(file, 820, 0.6));
+    } catch (e) {
+      toast(photoErrorMessage(e, file));
+    }
+    setBusy(false);
+  };
+
+  const post = async () => {
+    if (!text.trim() && !img) return;
+    setBusy(true);
+    const ts = Date.now();
+    const id = `${session.code}${ts.toString(36)}${Math.floor(Math.random() * 900 + 100)}`;
+    const item = {
+      id,
+      cls: session.cls,
+      group: session.group,
+      code: session.code,
+      author: me || "익명",
+      text: text.trim(),
+      img,
+      ts,
+    };
+
+    mine.current.posts.push(item);
+    setPosts((p) => [item, ...p]);
+    setText("");
+    setImg(null);
+
+    const ok = await S.set(`post:${id}`, item);
+    setBusy(false);
+    toast(ok ? "게시판에 올렸어요" : "저장 실패: " + (LAST_ERROR || "원인 불명"));
+  };
+
+  const reply = async (postId, t) => {
+    const ts = Date.now();
+    const entry = {
+      postId,
+      by: me || (isTeacher ? "선생님" : "친구"),
+      text: t,
+      ts,
+      teacher: isTeacher,
+      cls: isTeacher ? session.cls : null,
+    };
+    mine.current.replies.push(entry);
+    setReplies((r) => ({ ...r, [postId]: [...(r[postId] || []), entry] }));
+    const ok = await S.set(`re:${postId}:${ts.toString(36)}`, entry);
+    toast(ok ? "답글을 남겼어요" : "아직 저장이 안 됐어요. 인터넷 연결을 확인하세요");
+  };
+
+  const removePost = async (p) => {
+    mine.current.posts = mine.current.posts.filter((x) => x.id !== p.id);
+    setPosts((list) => list.filter((x) => x.id !== p.id));
+    await S.del(`post:${p.id}`);
+    const rk = await S.list(`re:${p.id}:`);
+    await Promise.all(rk.map((k) => S.del(k)));
+    toast("글을 지웠어요");
+  };
+
+  const shown = filter === "all" ? posts : posts.filter((p) => p.cls === filter);
+
+  return (
+    <>
+      {!isTeacher && (
+        <div className="card" style={{ "--accent": color }}>
+          <h2 style={{ fontSize: 19, marginBottom: 6 }}>오늘 뭐 먹었어?</h2>
+          <p className="mini" style={{ marginBottom: 12, lineHeight: 1.6 }}>
+            먹은 음식 사진과 한 줄 감상을 올리세요. 다른 모둠도 볼 수 있고, 선생님이 답글을 답니다.
+          </p>
+          {img && (
+            <div style={{ marginBottom: 10 }}>
+              <img className="thumb" src={img} alt="" style={{ maxHeight: 220 }} />
+              <button className="btn-ghost" onClick={() => setImg(null)}>
+                사진 빼기
+              </button>
+            </div>
+          )}
+          <textarea
+            className="inp"
+            placeholder="예) 3층 마제소바! 면이 쫄깃하고 계란이 최고였음"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+          <div className="btn-row" style={{ marginTop: 10 }}>
+            <PhotoPicker capture className="btn btn-sm" onPick={pick}>
+              사진 찍기
+            </PhotoPicker>
+            <PhotoPicker className="btn btn-sm" onPick={pick}>
+              앨범에서 고르기
+            </PhotoPicker>
+            <button
+              className="btn btn-sm btn-fill"
+              style={{ marginLeft: "auto" }}
+              onClick={post}
+              disabled={busy || (!text.trim() && !img)}
+            >
+              올리기
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="between" style={{ margin: "16px 0 10px" }}>
+        <div className="btn-row">
+          {[["all", "전체"], ["1", "1반"], ["3", "3반"], ["7", "7반"]].map(([v, l]) => (
+            <button
+              key={v}
+              className="btn btn-sm"
+              onClick={() => setFilter(v)}
+              style={filter === v ? { background: "#14121F", color: "#fff" } : {}}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
+        <button className="btn-ghost" onClick={refresh}>
+          새로 고침
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="card">
+          <p className="mini">불러오는 중…</p>
+        </div>
+      ) : shown.length === 0 ? (
+        <div className="empty">
+          아직 올라온 글이 없어요.
+          <br />
+          첫 번째로 올려 보세요.
+        </div>
+      ) : (
+        shown.map((p) => (
+          <PostCard
+            key={p.id}
+            post={p}
+            replies={replies[p.id]}
+            canReply
+            onReply={reply}
+            onZoom={onZoom}
+            onDelete={isTeacher ? removePost : null}
+          />
+        ))
+      )}
+    </>
+  );
+}
+
+/* ─────────────── 학생 화면 ─────────────── */
+function StudentApp({ session, onLogout, toast, onZoom }) {
+  const { code, cls, group } = session;
+  const color = CLASSES[cls].color;
+  const [tab, setTab] = useState("m1");
+  const [members, setMembers] = useState([]);
+  const [me, setMe] = useState("");
+
+  const pullMembers = useCallback(async () => {
+    const map = await S.getAll(`mem:${code}:`);
+    const names = Object.keys(map)
+      .map((k) => map[k])
+      .filter(Boolean)
+      .sort((a, b) => (a.ts || 0) - (b.ts || 0))
+      .map((m) => m.name);
+    setMembers(names);
+  }, [code]);
+
+  useEffect(() => {
+    pullMembers();
+    (async () => {
+      const saved = await S.get(`me:${code}`, false);
+      if (saved) setMe(saved);
+    })();
+  }, [code, pullMembers]);
+  usePoll(pullMembers, [code]);
+
+  return (
+    <>
+      <header className="top">
+        <div className="top-in">
+          <span className="mark" style={{ color }}>
+            스타필드 미션
+          </span>
+          <span style={{ marginLeft: "auto" }}>
+            <SyncBadge />
+          </span>
+          <span className="chip" style={{ background: color, color: "#fff" }}>
+            {cls}반 {group}모둠
+          </span>
+          <button className="btn-ghost" onClick={onLogout}>
+            나가기
+          </button>
+        </div>
+      </header>
+
+      <div className="sf-wrap">
+        <div className="tabs" style={{ "--accent": color }}>
+          {[
+            ["m1", "미션 1\n이름 찾기"],
+            ["m2", "미션 2\n장소 찾기"],
+            ["board", "먹은 것\n게시판"],
+            ["team", "모둠원"],
+          ].map(([v, l]) => (
+            <button
+              key={v}
+              className="tab"
+              aria-selected={tab === v}
+              onClick={() => setTab(v)}
+              style={{ whiteSpace: "pre-line" }}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
+
+        {tab === "m1" && (
+          <Mission1 code={code} cls={cls} color={color} me={me} toast={toast} onZoom={onZoom} />
+        )}
+        {tab === "m2" && <Mission2 code={code} color={color} me={me} toast={toast} onZoom={onZoom} />}
+        {tab === "board" && (
+          <Board session={session} me={me} color={color} toast={toast} onZoom={onZoom} />
+        )}
+        {tab === "team" && (
+          <>
+            <MembersCard
+              code={code}
+              color={color}
+              members={members}
+              setMembers={setMembers}
+              me={me}
+              setMe={setMe}
+              toast={toast}
+            />
+            <div className="card">
+              <h3 style={{ fontSize: 16, marginBottom: 8 }}>우리 모둠 코드</h3>
+              <p style={{ fontFamily: "'Jua',sans-serif", fontSize: 40, color }}>{code}</p>
+              <p className="mini" style={{ marginTop: 6 }}>
+                다른 모둠 친구들은 우리 미션 화면을 볼 수 없어요.
+              </p>
+            </div>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+/* ─────────────── 선생님 화면 ─────────────── */
+function TeacherApp({ session, onLogout, toast, onZoom }) {
+  const [tab, setTab] = useState(session.cls || "1");
+  const [data, setData] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [photos, setPhotos] = useState([]);
+  const [busy, setBusy] = useState(false);
+
+  const [syncedAt, setSyncedAt] = useState(0);
+  const lastEdit = useRef(0);
+
+  /* 18개 모둠을 모둠마다 부르지 않고 접두어별로 한 번에 읽는다 */
+  const pull = useCallback(async () => {
+    const [m1Map, m2Map, memMap, photoMap] = await Promise.all([
+      S.getAll("m1:"),
+      S.getAll("m2:"),
+      S.getAll("mem:"),
+      S.getAll("m2photo:"),
+    ]);
+
+    const next = {};
+    Object.keys(CODE_MAP).forEach((code) => {
+      next[code] = { m1: {}, m2: {}, members: [] };
+    });
+
+    const fill = (map, bucket, parse) => {
+      Object.keys(map).forEach((key) => {
+        const parts = key.split(":"); // 예) m1:137:4
+        const code = parts[1];
+        if (!next[code]) return;
+        parse(next[code][bucket], parts[2], map[key]);
+      });
+    };
+
+    fill(m1Map, "m1", (target, idx, val) => {
+      target[idx] = val;
+    });
+    fill(m2Map, "m2", (target, idx, val) => {
+      target[idx] = val;
+    });
+
+    const memBuckets = {};
+    Object.keys(memMap).forEach((key) => {
+      const code = key.split(":")[1];
+      if (!next[code]) return;
+      (memBuckets[code] = memBuckets[code] || []).push(memMap[key]);
+    });
+    Object.keys(memBuckets).forEach((code) => {
+      next[code].members = memBuckets[code]
+        .filter(Boolean)
+        .sort((a, b) => (a.ts || 0) - (b.ts || 0))
+        .map((m) => m.name);
+    });
+
+    const list = [];
+    for (let i = 0; i < M2_SLOTS; i++) list.push(photoMap[`m2photo:${i}`] || null);
+
+    setData(next);
+    if (Date.now() - lastEdit.current > 5000) setPhotos(list); // 입력 중이면 건너뛴다
+    setSyncedAt(Date.now());
+    setLoading(false);
+  }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    await pull();
+  }, [pull]);
+
+  useEffect(() => {
+    pull();
+  }, [pull]);
+  usePoll(pull, []);
+
+  const savePhoto = async (i, file) => {
+    setBusy(true);
+    try {
+      const img = await compressImage(file, 900, 0.62);
+      const next = [...photos];
+      while (next.length < M2_SLOTS) next.push(null);
+      next[i] = {
+        id: `p${i}`,
+        img,
+        hint: (next[i] && next[i].hint) || "",
+        answer: (next[i] && next[i].answer) || "",
+      };
+      setPhotos(next);
+      const ok = await S.set(`m2photo:${i}`, next[i]);
+      toast(ok ? "사진을 올렸어요. 모든 모둠 화면에 곧 나타납니다" : "저장이 안 됐어요");
+    } catch (e) {
+      toast(photoErrorMessage(e, file));
+    }
+    setBusy(false);
+  };
+
+  const patchTimer = useRef({});
+  const patchPhoto = (i, patch) => {
+    lastEdit.current = Date.now();
+    const next = [...photos];
+    while (next.length < M2_SLOTS) next.push(null);
+    next[i] = { ...(next[i] || { id: `p${i}`, img: "" }), ...patch };
+    setPhotos(next);
+    clearTimeout(patchTimer.current[i]);
+    patchTimer.current[i] = setTimeout(() => S.set(`m2photo:${i}`, next[i]), 800);
+  };
+
+  const clearPhoto = async (i) => {
+    const next = [...photos];
+    next[i] = null;
+    setPhotos(next);
+    await S.del(`m2photo:${i}`);
+    toast("사진을 내렸어요");
+  };
+
+  const cls = CLASSES[tab];
+
+  return (
+    <>
+      <header className="top">
+        <div className="top-in">
+          <span className="mark" style={{ color: CLASSES[session.cls].color }}>
+            스타필드 미션
+          </span>
+          <span
+            className="chip"
+            style={{ background: CLASSES[session.cls].color, color: "#fff" }}
+          >
+            {session.name}
+          </span>
+          <span style={{ marginLeft: "auto" }}>
+            <SyncBadge />
+          </span>
+          <span className="mini" style={{ fontSize: 11 }}>
+            {syncedAt ? `${timeLabel(syncedAt).slice(6)} 기준` : ""}
+          </span>
+          <button className="btn-ghost" onClick={load}>
+            새로 고침
+          </button>
+          <button className="btn-ghost" onClick={onLogout}>
+            나가기
+          </button>
+        </div>
+      </header>
+
+      <div className="sf-wrap">
+        <div className="tabs">
+          {["1", "3", "7"].map((c) => (
+            <button
+              key={c}
+              className="tab"
+              aria-selected={tab === c}
+              onClick={() => setTab(c)}
+              style={{ "--accent": CLASSES[c].color }}
+            >
+              {c}반
+            </button>
+          ))}
+          <button
+            className="tab"
+            aria-selected={tab === "m2"}
+            onClick={() => setTab("m2")}
+            style={{ "--accent": "#14121F" }}
+          >
+            미션2 사진
+          </button>
+          <button
+            className="tab"
+            aria-selected={tab === "board"}
+            onClick={() => setTab("board")}
+            style={{ "--accent": "#14121F" }}
+          >
+            게시판
+          </button>
+        </div>
+
+        {loading && (
+          <div className="card">
+            <p className="mini">불러오는 중…</p>
+          </div>
+        )}
+
+        {!loading && cls && (
+          <>
+            <div className="card" style={{ "--accent": cls.color }}>
+              <div className="between">
+                <div>
+                  <h2 style={{ fontSize: 19 }}>{cls.label}</h2>
+                  <p className="mini" style={{ marginTop: 4 }}>
+                    담임 {cls.teacher} · {cls.codes.length}개 모둠
+                  </p>
+                </div>
+                <span className="tag" style={{ background: cls.color, color: "#fff" }}>
+                  {cls.codes.filter((c) => Object.keys(data[c].m1).length >= letterCount(cls.teacher)).length}
+                  개 모둠 완료
+                </span>
+              </div>
+            </div>
+
+            {cls.codes.map((code, gi) => {
+              const d = data[code];
+              const total = letterCount(cls.teacher);
+              const slots = letterSlots(cls.teacher).filter((s) => s.type === "letter");
+              const answered = Object.keys(d.m2).length;
+              return (
+                <div className="card" key={code}>
+                  <div className="between" style={{ marginBottom: 10 }}>
+                    <h3 style={{ fontSize: 17 }}>{gi + 1}모둠</h3>
+                    <span className="chip">코드 {code}</span>
+                  </div>
+
+                  <p className="mini" style={{ marginBottom: 10 }}>
+                    모둠원 {d.members.length ? d.members.join(", ") : "아직 입력 안 함"}
+                  </p>
+
+                  <Progress done={Object.keys(d.m1).length} total={total} color={cls.color} />
+
+                  <div className="grid3" style={{ marginTop: 12 }}>
+                    {slots.map((s) => {
+                      const shot = d.m1[s.idx];
+                      return (
+                        <div key={s.idx} style={{ textAlign: "center" }}>
+                          {shot ? (
+                            <img
+                              src={shot.img}
+                              alt={s.ch}
+                              onClick={() => onZoom(shot.img)}
+                              style={{
+                                width: "100%",
+                                height: 72,
+                                objectFit: "cover",
+                                border: "2px solid #14121F",
+                                borderRadius: 9,
+                                cursor: "zoom-in",
+                              }}
+                            />
+                          ) : (
+                            <div
+                              style={{
+                                height: 72,
+                                border: "2px dashed #B9B4D0",
+                                borderRadius: 9,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                color: "#B9B4D0",
+                                fontFamily: "'Jua',sans-serif",
+                                fontSize: 22,
+                              }}
+                            >
+                              {s.ch}
+                            </div>
+                          )}
+                          <span className="mini" style={{ fontSize: 11 }}>
+                            {s.ch}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="hr" />
+
+                  <p className="label">
+                    미션 2 답변 {answered}/{photos.filter((p) => p && p.img).length || M2_SLOTS}
+                  </p>
+                  {answered === 0 ? (
+                    <p className="mini">아직 낸 답이 없어요.</p>
+                  ) : (
+                    Object.keys(d.m2)
+                      .sort()
+                      .map((k) => (
+                        <p key={k} style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>
+                          <span className="mini">{Number(k) + 1}번 </span>
+                          {d.m2[k].answer}
+                          {photos[k] && photos[k].answer && (
+                            <span
+                              className="mini"
+                              style={{
+                                marginLeft: 6,
+                                color:
+                                  d.m2[k].answer.replace(/\s/g, "").includes(
+                                    photos[k].answer.replace(/\s/g, "")
+                                  ) || photos[k].answer.replace(/\s/g, "").includes(d.m2[k].answer.replace(/\s/g, ""))
+                                    ? "#1B9E4B"
+                                    : "#D6360F",
+                              }}
+                            >
+                              (정답 {photos[k].answer})
+                            </span>
+                          )}
+                        </p>
+                      ))
+                  )}
+                </div>
+              );
+            })}
+          </>
+        )}
+
+        {!loading && tab === "m2" && (
+          <>
+            <div className="card">
+              <h2 style={{ fontSize: 19, marginBottom: 6 }}>미션 2 장소 사진</h2>
+              <p className="mini" style={{ lineHeight: 1.6 }}>
+                스타필드 곳곳을 찍은 사진 다섯 장을 올리세요. 올리는 즉시 모든 모둠 화면에 나타납니다.
+                힌트와 정답은 적어 두면 학생 답변 옆에 채점 표시가 붙습니다. 정답은 학생에게 보이지
+                않습니다.
+              </p>
+            </div>
+
+            {Array.from({ length: M2_SLOTS }).map((_, i) => {
+              const p = photos[i];
+              return (
+                <div className="card" key={i}>
+                  <div className="between" style={{ marginBottom: 10 }}>
+                    <h3 style={{ fontSize: 16 }}>{i + 1}번 사진</h3>
+                    {p && p.img && (
+                      <button className="btn-ghost" onClick={() => clearPhoto(i)}>
+                        내리기
+                      </button>
+                    )}
+                  </div>
+                  {p && p.img ? (
+                    <img
+                      className="thumb"
+                      src={p.img}
+                      alt=""
+                      style={{ maxHeight: 240, marginBottom: 10 }}
+                      onClick={() => onZoom(p.img)}
+                    />
+                  ) : (
+                    <div className="empty" style={{ marginBottom: 10 }}>
+                      비어 있음
+                    </div>
+                  )}
+                  <input
+                    className="inp"
+                    placeholder="힌트 (선택) — 학생에게 보임"
+                    value={(p && p.hint) || ""}
+                    onChange={(e) => patchPhoto(i, { hint: e.target.value })}
+                    style={{ marginBottom: 8 }}
+                  />
+                  <input
+                    className="inp"
+                    placeholder="정답 메모 (선택) — 선생님만 보임"
+                    value={(p && p.answer) || ""}
+                    onChange={(e) => patchPhoto(i, { answer: e.target.value })}
+                  />
+                  <div className="btn-row" style={{ marginTop: 10 }}>
+                    <PhotoPicker className="btn btn-sm btn-lime" onPick={(f) => savePhoto(i, f)}>
+                      {p && p.img ? "사진 바꾸기" : "사진 올리기"}
+                    </PhotoPicker>
+                    {busy && <span className="mini">올리는 중…</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </>
+        )}
+
+        {!loading && tab === "board" && (
+          <Board
+            session={session}
+            me={session.name}
+            color={CLASSES[session.cls].color}
+            toast={toast}
+            onZoom={onZoom}
+          />
+        )}
+
+        {!loading && cls && (
+          <div className="card flat" style={{ background: "#fff" }}>
+            <h3 style={{ fontSize: 15, marginBottom: 8 }}>{cls.label} 모둠 코드</h3>
+            <div className="btn-row">
+              {cls.codes.map((c, i) => (
+                <span key={c} className="chip">
+                  {i + 1}모둠 {c}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+/* ─────────────── 루트 ─────────────── */
+function App() {
+  const [session, setSession] = useState(null);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [toastMsg, setToastMsg] = useState("");
+  const [zoom, setZoom] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      const s = await S.get("session", false);
+      if (s && ((s.role === "teacher" && CLASSES[s.cls]) || CODE_MAP[s.code])) setSession(s);
+      setReady(true);
+    })();
+  }, []);
+
+  const toast = useCallback((msg) => {
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(""), 2200);
+  }, []);
+
+  const login = async (s) => {
+    setSession(s);
+    await S.set("session", s, false);
+  };
+  const logout = async () => {
+    setSession(null);
+    await S.set("session", null, false);
+  };
+
+  return (
+    <div className="sf">
+      <style>{CSS}</style>
+      {!ready ? (
+        <div className="sf-wrap" style={{ paddingTop: 40 }}>
+          <p className="mini">준비 중…</p>
+        </div>
+      ) : setupOpen ? (
+        <Setup onClose={() => setSetupOpen(false)} />
+      ) : !session ? (
+        <Login onLogin={login} onSetup={() => setSetupOpen(true)} />
+      ) : session.role === "teacher" ? (
+        <TeacherApp session={session} onLogout={logout} toast={toast} onZoom={setZoom} />
+      ) : (
+        <StudentApp session={session} onLogout={logout} toast={toast} onZoom={setZoom} />
+      )}
+      <Toast msg={toastMsg} />
+      <Lightbox src={zoom} onClose={() => setZoom(null)} />
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+<noscript>
+  <div style="font-family:sans-serif;padding:40px;text-align:center">
+    이 앱을 쓰려면 브라우저에서 자바스크립트를 켜 주세요.
+  </div>
+</noscript>
+</body>
+</html>
